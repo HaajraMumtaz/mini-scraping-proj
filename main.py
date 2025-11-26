@@ -3,6 +3,39 @@ import logging
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
+import re
+def clean_text(text: str) -> str:
+    if not text:
+        return ""
+    
+    text = text.strip()
+    
+    # remove citation markers like [12]
+    text = re.sub(r"\[.*?\]", "", text)
+    
+    # remove weird spaces
+    text = text.replace("\xa0", " ")
+    
+    return text
+def clean_country(text: str) -> str:
+    text = clean_text(text)
+    
+    # remove text inside parentheses
+    text = re.sub(r"\(.*?\)", "", text)
+    
+    return text.strip()
+def clean_number(text: str):
+    text = clean_text(text)
+    text = text.replace(",", "")
+    
+    # handle missing values
+    if text in ["", "—", "-", "N/A"]:
+        return None
+    
+    try:
+        return int(text)
+    except ValueError:
+        return None
 
 # Configure logging
 logging.basicConfig(level=logging.INFO,
@@ -37,8 +70,35 @@ html = fetch_page("https://en.wikipedia.org/wiki/List_of_countries_by_GDP_(nomin
 
 soup =BeautifulSoup(html,"html.parser")
 tables=soup.find_all("table",{"class": "wikitable"})
-target_table = tables[3]
+target_table = None
+for t in tables:
+    cap = t.find("caption")
+    if cap and "GDP" in cap.get_text():
+        target_table = t
+        break
 
-df = pd.read_html(str(target_table))[0]
+if target_table is None:
+    raise Exception("Could not find GDP table on the page.")
+results=[]
+rows=target_table.find_all("tr")
+data_rows=rows[1:]
+for row in data_rows:
+    cells = row.find_all("td")
+    if len(cells) < 3:
+        continue
+    rank = clean_number(cells[0].get_text())
+    country = clean_country(cells[1].get_text())
+    gdp = clean_number(cells[2].get_text())
 
-print(df.head())
+    if country and gdp:
+        results.append({
+            "rank": rank,
+            "country": country,
+            "gdp_usd_million": gdp
+        })
+
+# Preview first few
+for r in results[:5]:
+    print(r)
+
+
