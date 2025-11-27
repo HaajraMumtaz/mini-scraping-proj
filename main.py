@@ -41,64 +41,80 @@ def clean_number(text: str):
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s - %(levelname)s - %(message)s")
 
-def fetch_page(url: str):
+def fetch_page(url):
     headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0.0.0 Safari/537.36"
-        ),
-        "Accept-Language": "en-US,en;q=0.9",
-    }
+    "User-Agent": "...",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+}
 
-    try:
-        response = requests.get(url, headers=headers, timeout=10)
+    response = requests.get(url, timeout=10,headers=headers)
+    response.raise_for_status()
+    return response.text
 
-        if response.status_code != 200:
-            logging.error(f"Failed to fetch {url}: HTTP {response.status_code}")
-            return None
+def find_table_by_caption(soup, target_keywords):
+    tables = soup.find_all("table")
+    for table in tables:
+        caption = table.find("caption")
+        if caption:
+            text = caption.get_text(strip=True).lower()
+            if any(keyword in text for keyword in target_keywords):
+                print("FOUND TABLE:", caption.get_text(strip=True))
+                return table
+    raise Exception("No matching table found.")
 
-        logging.info(f"Successfully fetched {url}")
-        return response.text
+def parse_gdp_table(table):
+    rows = table.find_all("tr")
+    data = []
+    ix=0
+    # Extract header positions dynamically
+    headers = [th.get_text(strip=True).lower() for th in rows[0].find_all("th")]
 
-    except requests.RequestException as e:
-        logging.error(f"Request error for {url}: {e}")
-        return None
+    rank_idx = headers.index("rank") if "rank" in headers else None
+    country_idx = None
+    gdp_idx = None
+
+    # Detect country and gdp columns
+    for i, h in enumerate(headers):
+        if "country" in h:
+            country_idx = i
+        if "gdp" in h and ("million" in h or "$" in h):
+            gdp_idx = i
 
 
-html = fetch_page("https://en.wikipedia.org/wiki/List_of_countries_by_GDP_(nominal)")
+    for row in rows[1:]:  
+        cols = row.find_all(["td", "th"])
+        cols = [c.get_text(" ", strip=True) for c in cols]
 
-soup =BeautifulSoup(html,"html.parser")
-tables=soup.find_all("table",{"class": "wikitable"})
-target_table = None
-for t in tables:
-    cap = t.find("caption")
-    if cap and "GDP" in cap.get_text():
-        target_table = t
-        break
+        if len(cols) < 3:
+            continue
 
-if target_table is None:
-    raise Exception("Could not find GDP table on the page.")
-results=[]
-rows=target_table.find_all("tr")
-data_rows=rows[1:]
-for row in data_rows:
-    cells = row.find_all("td")
-    if len(cells) < 3:
-        continue
-    rank = clean_number(cells[0].get_text())
-    country = clean_country(cells[1].get_text())
-    gdp = clean_number(cells[2].get_text())
+        rank = ix
+        ix+=1
+        country = cols[0]
+        gdp_raw = cols[2]
 
-    if country and gdp:
-        results.append({
+        # Clean GDP number
+        gdp_clean = ''.join(ch for ch in gdp_raw if ch.isdigit())
+
+        data.append({
             "rank": rank,
             "country": country,
-            "gdp_usd_million": gdp
+            "gdp_usd_million": int(gdp_clean) if gdp_clean else None
         })
 
-# Preview first few
-for r in results[:5]:
-    print(r)
+    for item in data[1:10]:
+        print(item)
+
+url = "https://en.wikipedia.org/wiki/List_of_countries_by_GDP_(nominal)"
+html = fetch_page(url)
+soup = BeautifulSoup(html, "html.parser")
+
+table = find_table_by_caption(
+    soup,
+    ["gdp", "nominal", "million"]  # keywords
+)
+
+results = parse_gdp_table(table)
 
 
